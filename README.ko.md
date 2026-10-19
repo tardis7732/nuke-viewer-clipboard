@@ -1,6 +1,6 @@
 # Nuke Viewer Clipboard
 
-현재 Viewer 프레임을 **출력 해상도 그대로 클립보드에 복사**하는 Nuke 플러그인입니다. **Ctrl+Alt+C**로 복사하고, 이미지를 지원하는 앱에 붙여넣을 수 있습니다.
+현재 Viewer 입력을 **출력 해상도 그대로 Rec.709로 클립보드에 복사**하는 Nuke 플러그인입니다. **Ctrl+Alt+C**로 복사하고, 이미지를 지원하는 앱에 붙여넣을 수 있습니다.
 
 [English](README.md) · [다운로드](https://github.com/tardis7732/nuke-viewer-clipboard/releases/latest)
 
@@ -9,8 +9,9 @@
 - 활성 Viewer의 기본 입력과 현재 프레임을 사용합니다.
 - Reformat을 포함한 연결 노드의 출력 크기를 따릅니다.
 - Viewer 확대·이동과 관계없이 전체 프레임을 복사하며, UI 여백과 오버레이는 포함하지 않습니다.
-- Viewer Process와 Viewer의 gain·gamma·saturation 설정을 적용합니다.
-- 클립보드에는 불투명한 8비트 RGB 이미지와 PNG 데이터를 넣습니다.
+- 작업 색공간을 linear Rec.709로 바꾼 뒤 Nuke의 `rec709` 출력 커브를 한 번 적용합니다.
+- Viewer의 gain·gamma·saturation은 Input Process가 담당하는 경우까지 포함해 한 번만 적용합니다.
+- 클립보드에는 불투명한 8비트 RGB 이미지와 Rec.709 ICC 프로필을 담은 PNG 데이터를 넣습니다.
 - 현재 한 프레임만 임시 PNG로 렌더하고, 이미지를 읽은 뒤 임시 폴더를 삭제합니다.
 
 예를 들어 **1920 × 1080 Reformat**을 Viewer에 연결하면 복사되는 이미지도 **1920 × 1080**입니다. 영상 자체에 포함된 레터박스는 유지됩니다.
@@ -40,6 +41,8 @@
 
 복사가 완료되면 프레임 번호와 이미지 크기가 툴팁으로 표시됩니다. 처리 시간은 연결된 노드 그래프에 따라 달라집니다. 렌더를 취소하면 기존 클립보드 내용이 유지됩니다.
 
+최종 출력은 Rec.709로 고정합니다. 선택한 Viewer Process/표시 LUT는 굽지 않으므로 Raw·sRGB·Display P3·ACES 톤매핑·Rec.1886로 보는 Viewer와는 다르게 보일 수 있습니다. Viewer gain·gamma 조절은 포함되므로, 추가 보정 없이 출력하려면 두 값을 1로 둡니다.
+
 ### 단축키 변경
 
 `NukeViewerClipboard/menu.py`에서 원하는 조합을 지정합니다.
@@ -63,8 +66,9 @@ PNG는 운영체제 임시 경로의 `nuke_viewer_clipboard_*` 폴더에 생성�
 - 출력은 표시용 8비트 이미지입니다. 알파 투명도와 부동소수점 HDR 값은 보존하지 않습니다.
 - Viewer의 A/B 와이프·비교 모드·3D 뷰·마스크·오버레이는 재현하지 않으며 기본 입력을 복사합니다.
 - RGB 및 R/G/B/A/Y 채널 표시를 지원합니다. 다른 채널 표시 모드는 오류 안내 후 중단합니다.
-- `Group`으로 구성한 사용자 정의 Viewer Process는 지원하지 않습니다. 단일 입력 Input Process 노드·Group은 복사할 수 있지만, 외부 연결이나 상대 경로 표현식에 의존하는 설정은 별도 출력 구성이 필요할 수 있습니다.
-- 붙여넣은 앱의 색상 관리에 따라 표시 결과가 달라질 수 있습니다.
+- 단일 입력 Input Process 노드·Group은 복사할 수 있지만, 외부 연결이나 상대 경로 표현식에 의존하는 설정은 별도 출력 구성이 필요할 수 있습니다. IP의 before/after 설정은 Rec.709 출력 변환을 기준으로 적용합니다.
+- OCIO 프로젝트는 config에 linear Rec.709 색공간이 있어야 합니다. Nuke 기본 config와 내장 ACES CG 1.3/2.0 config를 지원하며, 인식하지 못한 config에서는 오류를 안내합니다.
+- PNG 데이터에는 Rec.709 프로필이 들어갑니다. 프로필 없는 클립보드 비트맵을 쓰거나 기존 문서에 붙이는 앱은 대상 문서의 프로필을 사용할 수 있습니다.
 
 ## 삭제
 

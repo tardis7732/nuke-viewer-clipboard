@@ -1,4 +1,4 @@
-"""Copy the active Viewer's input at its full output format, without UI margins."""
+"""Copy the active Viewer input at full resolution in Rec.709."""
 
 import os
 import tempfile
@@ -22,28 +22,38 @@ def _value(node, name, default=None):
     return knob.value() if knob is not None else default
 
 
-def _clone_process(original):
-    """Copy a registered Viewer Process without touching its live instance."""
-    if original.Class() == "Group":
-        raise RuntimeError("A custom Group Viewer Process needs a dedicated export setup.")
-    clone = getattr(nuke.nodes, original.Class())()
-    excluded = {
-        "name", "xpos", "ypos", "selected", "onCreate", "onDestroy",
-        "knobChanged", "updateUI", "autolabel", "rootNodeUpdated", "panel",
-    }
-    # Set the display before the dependent view enumeration.
-    keys = list(original.knobs())
-    keys = [k for k in ("colorspace", "display", "view") if k in keys] + [
-        k for k in keys if k not in ("colorspace", "display", "view")
-    ]
-    for name in keys:
-        knob = clone.knob(name)
-        if knob is None or name in excluded:
-            continue
-        if original[name].Class() in ("Tab_Knob", "Text_Knob", "PyScript_Knob", "Script_Knob"):
-            continue
-        knob.fromScript(original[name].toScript(False))
-    return clone
+def _to_rec709(source):
+    """Convert working RGB primaries, then apply Nuke's rec709 curve once."""
+    if _value(nuke.root(), "colorManagement", "Nuke") == "OCIO":
+        conversion = nuke.nodes.OCIOColorSpace(inputs=[source])
+        available = {name.split("\t", 1)[0]
+                     for name in conversion["out_colorspace"].values()}
+        candidates = ("Linear Rec.709 (sRGB)", "Utility - Linear - sRGB",
+                      "Utility - Linear - Rec.709", "lin_rec709")
+        target = next((name for name in candidates if name in available), None)
+        if target is None and _value(nuke.root(), "OCIO_config") == "nuke-default":
+            target = "linear"
+        if target is None:
+            raise RuntimeError("The OCIO config needs a linear Rec.709 colorspace.")
+        conversion["in_colorspace"].setValue(nuke.root()["workingSpaceLUT"].value())
+        conversion["out_colorspace"].setValue(target)
+        source = conversion
+    return nuke.nodes.ViewerLUT(inputs=[source], current="rec709", rgb_only=True)
+
+
+def _rec709_profile():
+    """Describe Rec.709 RGB samples for PNG-aware, color-managed applications."""
+    curve = []
+    for i in range(4096):
+        encoded = i / 4095.0
+        linear = (encoded / 4.5 if encoded < 0.081
+                  else ((encoded + 0.099) / 1.099) ** (1 / 0.45))
+        curve.append(round(linear * 65535))
+    profile = QtGui.QColorSpace(QtGui.QColorSpace.Primaries.SRgb, curve)
+    profile.setDescription("Rec.709")
+    if not profile.isValid():
+        raise RuntimeError("Could not create the Rec.709 image profile.")
+    return profile
 
 
 def _save_input_process(node, path):
@@ -61,8 +71,8 @@ def _save_input_process(node, path):
                 item.setSelected(True)
 
 
-def _render_frame(viewer, source, frame, view, process, path):
-    """Render one display-referred frame and restore the working script."""
+def _render_frame(viewer, source, frame, view, path):
+    """Render one Rec.709 frame and restore the working script."""
     parent = viewer.parent()
     ip_name = _value(viewer, "input_process_node", "")
     ip_enabled = _value(viewer, "input_process", False)
@@ -73,10 +83,9 @@ def _render_frame(viewer, source, frame, view, process, path):
         name: float(_value(viewer, name, 1))
         for name in ("gain", "gamma", "saturation")
     }
-    # Nuke delegates matching controls to IP first, then Viewer Process.
+    # An Input Process can own a control; otherwise apply it externally once.
     owners = {
-        name: next((node for node in (ip, process)
-                    if node is not None and node.knob(name) is not None), None)
+        name: ip if ip is not None and ip.knob(name) is not None else None
         for name in controls
     }
 
@@ -121,11 +130,7 @@ def _render_frame(viewer, source, frame, view, process, path):
                 bind_controls(clone, ip)
                 clone.setInput(0, current)
                 current = clone
-            if process is not None:
-                clone = _clone_process(process)
-                bind_controls(clone, process)
-                clone.setInput(0, current)
-                current = clone
+            current = _to_rec709(current)
             if ip is not None and not ip_before:
                 clone = nuke.nodePaste(ip_path)
                 bind_controls(clone, ip)
@@ -164,12 +169,14 @@ def _render_frame(viewer, source, frame, view, process, path):
                 inputs=[current], file=path.replace("\\", "/"),
                 file_type="png", channels="rgb",
             )
+            # Rec.709 is already encoded above: do not apply a second transform.
             writer["raw"].setValue(True)
             writer["datatype"].setValue("8 bit")
             nuke.execute(writer, frame, frame, views=[view])
         return {
             "viewer": viewer.fullName(), "source": source.fullName(),
             "frame": frame, "width": width, "height": height,
+            "colorspace": "Rec.709",
         }
     finally:
         # Restore global state even if removing a temporary node fails.
@@ -197,7 +204,7 @@ def _render_frame(viewer, source, frame, view, process, path):
 
 
 def copy_frame():
-    """Render one full-format frame with the Viewer display transform to PNG."""
+    """Copy one full-format Rec.709 frame to the clipboard."""
     global _busy
     if _busy:
         return None
@@ -213,18 +220,18 @@ def copy_frame():
             raise RuntimeError("Connect an image to the active Viewer input first.")
         frame = int(_value(viewer, "frame", nuke.frame()))
         view = window.view()
-        process = nuke.ViewerProcess.node(viewer=viewer.fullName())
         app = QtWidgets.QApplication.instance()
         if app is None:
             raise RuntimeError("Copy Frame requires the Nuke GUI.")
 
         with tempfile.TemporaryDirectory(prefix="nuke_viewer_clipboard_") as temp:
             path = os.path.join(temp, "frame.png")
-            result = _render_frame(viewer, source, frame, view, process, path)
+            result = _render_frame(viewer, source, frame, view, path)
             picture = QtGui.QImage(path)
             if picture.isNull():
                 raise RuntimeError("The frame render returned no image.")
             picture = picture.convertToFormat(QtGui.QImage.Format_RGB32)
+            picture.setColorSpace(_rec709_profile())
             if (picture.width(), picture.height()) != (result["width"], result["height"]):
                 raise RuntimeError("The rendered image size did not match the input format.")
 
@@ -238,7 +245,7 @@ def copy_frame():
         data.setImageData(picture)
         data.setData("image/png", png)
         app.clipboard().setMimeData(data)
-        message = "Copied Viewer frame {frame:g} ({width} x {height})".format(**result)
+        message = "Copied Rec.709 frame {frame:g} ({width} x {height})".format(**result)
         nuke.tprint(message)
         QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), message)
         return result

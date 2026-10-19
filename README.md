@@ -1,6 +1,6 @@
 # Nuke Viewer Clipboard
 
-Copy the current Viewer frame to the clipboard at its output resolution with **Ctrl+Alt+C**, then paste it into an application that accepts images.
+Copy the current Viewer input to the clipboard at its output resolution in **Rec.709** with **Ctrl+Alt+C**, then paste it into an application that accepts images.
 
 [한국어](README.ko.md) · [Download](https://github.com/tardis7732/nuke-viewer-clipboard/releases/latest)
 
@@ -9,8 +9,9 @@ Copy the current Viewer frame to the clipboard at its output resolution with **C
 - Uses the active Viewer’s primary input and current frame.
 - Follows the connected node’s output format, including Reformat dimensions.
 - Copies the full frame regardless of Viewer zoom or pan, without interface margins or overlays.
-- Applies the Viewer Process and Viewer gain, gamma and saturation settings.
-- Places an opaque, 8-bit RGB image on the clipboard, with PNG data for compatible applications.
+- Converts the working RGB space to linear Rec.709, then applies Nuke's `rec709` output curve once.
+- Applies Viewer gain, gamma and saturation once, including controls handled by an Input Process.
+- Places an opaque, 8-bit RGB image on the clipboard, with a Rec.709 ICC profile in the PNG data.
 - Renders one frame to a temporary PNG and removes the temporary directory after loading it.
 
 For example, a **1920 × 1080 Reformat** connected to the Viewer produces a **1920 × 1080 clipboard image**. Black bars that are part of the image remain intact.
@@ -40,6 +41,8 @@ The plugin’s `menu.py` stays inside `NukeViewerClipboard`; do not replace your
 
 A tooltip shows the copied frame number and image dimensions. Render time depends on the upstream node graph. Cancelling the render leaves the existing clipboard contents unchanged.
 
+Output is fixed to Rec.709. The selected Viewer Process/display LUT is not baked in. A Viewer set to Raw, sRGB, Display P3, ACES tone mapping or Rec.1886 can therefore look different. Viewer gain and gamma adjustments are included; reset them to 1 for an unadjusted export.
+
 ### Change the shortcut
 
 Edit `NukeViewerClipboard/menu.py` and pass the key combination you prefer:
@@ -63,8 +66,9 @@ The temporary PNG is created inside the operating system’s temporary directory
 - The output is an 8-bit display-referred preview. Alpha transparency and floating-point HDR values are not retained.
 - Viewer A/B wipes, comparison modes, 3D views, masks and overlays are not reproduced. The primary input is copied.
 - RGB and individual R/G/B/A/Y channel display modes are supported. Other channel display modes are rejected.
-- Custom Viewer Processes implemented as `Group` nodes are not supported. Single-input Input Process nodes and Groups can be copied; external dependencies or relative expressions inside custom processes may require a dedicated export setup.
-- Display appearance in another application depends on that application’s color management.
+- Single-input Input Process nodes and Groups can be copied; external dependencies or relative expressions inside custom processes may require a dedicated export setup. The IP before/after setting is relative to the Rec.709 output transform.
+- OCIO projects require a linear Rec.709 space in the config. Nuke's default config and the bundled ACES CG 1.3/2.0 configs are supported; an unrecognized config produces an error.
+- The PNG representation carries a Rec.709 profile. Applications that use an untagged clipboard bitmap or paste into an existing document may use the destination document's profile instead.
 
 ## Uninstall
 

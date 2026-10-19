@@ -69,6 +69,24 @@ def _render_frame(viewer, source, frame, view, process, path):
     with parent:
         ip = nuke.toNode(ip_name) if ip_enabled and ip_name else None
         selected = nuke.selectedNodes()
+    controls = {
+        name: float(_value(viewer, name, 1))
+        for name in ("gain", "gamma", "saturation")
+    }
+    # Nuke delegates matching controls to IP first, then Viewer Process.
+    owners = {
+        name: next((node for node in (ip, process)
+                    if node is not None and node.knob(name) is not None), None)
+        for name in controls
+    }
+
+    def bind_controls(clone, original):
+        for name, value in controls.items():
+            if owners[name] is original:
+                knob = clone[name]
+                knob.clearAnimated()
+                knob.setValue(value)
+
     root = nuke.root()
     was_modified = root.modified()
     was_proxy = root.proxy()
@@ -91,8 +109,8 @@ def _render_frame(viewer, source, frame, view, process, path):
             layer = _value(viewer, "channels", "rgba")
             if layer not in ("rgba", "rgb"):
                 current = nuke.nodes.Shuffle(inputs=[current], **{"in": layer})
-            gain = float(_value(viewer, "gain", 1))
-            if gain != 1:
+            gain = controls["gain"]
+            if gain != 1 and owners["gain"] is None:
                 current = nuke.nodes.Multiply(inputs=[current], channels="rgb", value=gain)
             ip_before = (
                 _value(viewer, "viewerInputOrder", "before viewer process")
@@ -100,21 +118,24 @@ def _render_frame(viewer, source, frame, view, process, path):
             )
             if ip is not None and ip_before:
                 clone = nuke.nodePaste(ip_path)
+                bind_controls(clone, ip)
                 clone.setInput(0, current)
                 current = clone
             if process is not None:
                 clone = _clone_process(process)
+                bind_controls(clone, process)
                 clone.setInput(0, current)
                 current = clone
             if ip is not None and not ip_before:
                 clone = nuke.nodePaste(ip_path)
+                bind_controls(clone, ip)
                 clone.setInput(0, current)
                 current = clone
-            gamma = float(_value(viewer, "gamma", 1))
-            if gamma != 1:
+            gamma = controls["gamma"]
+            if gamma != 1 and owners["gamma"] is None:
                 current = nuke.nodes.Gamma(inputs=[current], channels="rgb", value=gamma)
-            saturation = float(_value(viewer, "saturation", 1))
-            if saturation != 1:
+            saturation = controls["saturation"]
+            if saturation != 1 and owners["saturation"] is None:
                 current = nuke.nodes.Saturation(inputs=[current], saturation=saturation)
             style = _value(viewer, "layer_display_style", "RGB")
             channel = {

@@ -72,7 +72,14 @@ def _to_rec709(source, process):
             raise RuntimeError("Cannot determine this Viewer's display encoding.")
         if space.getReferenceSpaceType() == ocio.REFERENCE_SPACE_DISPLAY:
             if space.getEncoding() == "hdr-video":
-                raise RuntimeError("Select an SDR Viewer display before copying to Rec.709.")
+                # The clipboard is an SDR screen preview. Keep the HDR Viewer's
+                # rendered RGB appearance on an sRGB display; decoding PQ/HLG
+                # to absolute luminance here would brighten and clip that preview.
+                # This is not a luminance-preserving HDR-to-SDR master conversion.
+                return nuke.nodes.Colorspace(
+                    inputs=[source], channels="rgb",
+                    colorspace_in="sRGB", colorspace_out="rec709",
+                )
             target = config.getColorSpace("rec1886_rec709_display")
             if target is None:
                 target = config.getColorSpace("Rec.1886 Rec.709 - Display")

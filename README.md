@@ -45,6 +45,8 @@ The color pipeline is **Viewer Process and adjustments → display-color convers
 
 Raw bypasses the view transform, so its visible RGB is interpreted in the selected OCIO display's encoding. Native Raw/None and Nuke's default Raw view use an sRGB display assumption.
 
+HDR Viewer displays can also be copied as an **SDR screen preview**. The selected HDR view transform and Viewer adjustments remain baked in; their rendered RGB values are interpreted as an sRGB screen preview and encoded as Rec.709. This preserves that preview without adding a tone map. It does not reproduce HDR-monitor luminance or create an HDR-to-SDR delivery master.
+
 ### Change the shortcut
 
 Edit `NukeViewerClipboard/menu.py` and pass the key combination you prefer:
@@ -69,7 +71,7 @@ The temporary PNG is created inside the operating system’s temporary directory
 - Viewer A/B wipes, comparison modes, 3D views, masks and overlays are not reproduced. The primary input is copied.
 - RGB and individual R/G/B/A/Y channel display modes are supported. Other channel display modes are rejected.
 - Single-input Input Process nodes and Groups can be copied; external dependencies or relative expressions inside custom processes may require a dedicated export setup. IP ordering remains relative to the Viewer Process; Rec.709 conversion follows both.
-- Supports native sRGB, Rec.709 and gamma display LUTs, standard SDR views in Nuke's default OCIO config, and SDR displays in the bundled ACES CG 1.3/2.0 configs. ACES configs must expose display-referred source and Rec.1886 Rec.709 destination spaces. Unsupported/custom Viewer Processes and HDR displays produce an error.
+- Supports native sRGB, Rec.709 and gamma display LUTs, standard SDR views in Nuke's default OCIO config, and the bundled ACES CG 1.3/2.0 displays. SDR ACES conversion requires display-referred source and Rec.1886 Rec.709 destination spaces; HDR displays use the screen-preview behavior above. Unsupported/custom Viewer Processes produce an error.
 - Colors outside Rec.709's gamut and the 8-bit output range may clip. The plugin does not inspect the monitor's calibration or operating-system display profile.
 - The PNG representation carries a Rec.709 profile. Applications that use an untagged clipboard bitmap or paste into an existing document may use the destination document's profile instead.
 

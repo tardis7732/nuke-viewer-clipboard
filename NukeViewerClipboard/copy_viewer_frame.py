@@ -1,4 +1,4 @@
-"""Copy the active Viewer's look at full resolution, encoded as Rec.709."""
+"""Copy the active Viewer's look at full resolution, encoded as sRGB."""
 
 import os
 import tempfile
@@ -46,7 +46,7 @@ def _clone_process(original):
     return clone
 
 
-def _to_rec709(source, process):
+def _to_srgb(source, process):
     """Convert already displayed RGB, without undoing or repeating its view transform."""
     encoding = "sRGB"  # Native Raw/None has no encoding; use an sRGB display.
     if process is not None and process.Class() == "OCIODisplay":
@@ -76,20 +76,16 @@ def _to_rec709(source, process):
                 # rendered RGB appearance on an sRGB display; decoding PQ/HLG
                 # to absolute luminance here would brighten and clip that preview.
                 # This is not a luminance-preserving HDR-to-SDR master conversion.
-                return nuke.nodes.Colorspace(
-                    inputs=[source], channels="rgb",
-                    colorspace_in="sRGB", colorspace_out="rec709",
-                )
-            target = config.getColorSpace("rec1886_rec709_display")
+                return source
+            target = config.getColorSpace("srgb_display")
             if target is None:
-                target = config.getColorSpace("Rec.1886 Rec.709 - Display")
+                target = config.getColorSpace("sRGB - Display")
             if target is None or target.getReferenceSpaceType() != ocio.REFERENCE_SPACE_DISPLAY:
-                raise RuntimeError("The config needs a Rec.1886 Rec.709 display colorspace.")
+                raise RuntimeError("The config needs an sRGB display colorspace.")
             conversion = nuke.nodes.OCIOColorSpace(inputs=[source])
             conversion["in_colorspace"].setValue(space.getName())
             conversion["out_colorspace"].setValue(target.getName())
-            source = conversion
-            encoding = "2.40"
+            return conversion
         elif _value(nuke.root(), "OCIO_config") == "nuke-default":
             encoding = space.getName()
         else:
@@ -103,27 +99,20 @@ def _to_rec709(source, process):
                 "Gamma2.4": "2.40", "Gamma2.6": "2.60"}.get(encoding, encoding)
     if encoding not in ("sRGB", "rec709", "1.80", "2.20", "2.40", "2.60", "BT1886"):
         raise RuntimeError("Unsupported Viewer display encoding: {}".format(encoding))
-    if encoding == "rec709":
+    if encoding == "sRGB":
         return source
-    # Decode only the display transfer curve and encode Rec.709. The Viewer
+    # Decode only the display transfer curve and encode sRGB. The Viewer
     # Process (including ACES tone mapping) has already been baked upstream.
     return nuke.nodes.Colorspace(
-        inputs=[source], channels="rgb", colorspace_in=encoding, colorspace_out="rec709",
+        inputs=[source], channels="rgb", colorspace_in=encoding, colorspace_out="sRGB",
     )
 
 
-def _rec709_profile():
-    """Describe Rec.709 RGB samples for PNG-aware, color-managed applications."""
-    curve = []
-    for i in range(4096):
-        encoded = i / 4095.0
-        linear = (encoded / 4.5 if encoded < 0.081
-                  else ((encoded + 0.099) / 1.099) ** (1 / 0.45))
-        curve.append(round(linear * 65535))
-    profile = QtGui.QColorSpace(QtGui.QColorSpace.Primaries.SRgb, curve)
-    profile.setDescription("Rec.709")
+def _srgb_profile():
+    """Describe sRGB samples for PNG-aware, color-managed applications."""
+    profile = QtGui.QColorSpace(QtGui.QColorSpace.NamedColorSpace.SRgb)
     if not profile.isValid():
-        raise RuntimeError("Could not create the Rec.709 image profile.")
+        raise RuntimeError("Could not create the sRGB image profile.")
     return profile
 
 
@@ -143,7 +132,7 @@ def _save_input_process(node, path):
 
 
 def _render_frame(viewer, source, frame, view, process, path):
-    """Render one Rec.709 frame and restore the working script."""
+    """Render one sRGB frame and restore the working script."""
     parent = viewer.parent()
     ip_name = _value(viewer, "input_process_node", "")
     ip_enabled = _value(viewer, "input_process", False)
@@ -237,7 +226,7 @@ def _render_frame(viewer, source, frame, view, process, path):
                 raise RuntimeError(
                     "Switch the Viewer channel display to RGB, R, G, B, A or Y before copying."
                 )
-            current = _to_rec709(current, process)
+            current = _to_srgb(current, process)
             # Crop only the format boundary, never detect black pixels in the image.
             fmt = current.format()
             width, height = fmt.width(), fmt.height()
@@ -247,14 +236,14 @@ def _render_frame(viewer, source, frame, view, process, path):
                 inputs=[current], file=path.replace("\\", "/"),
                 file_type="png", channels="rgb",
             )
-            # Rec.709 is already encoded above: do not apply a second transform.
+            # sRGB is already encoded above: do not apply a second transform.
             writer["raw"].setValue(True)
             writer["datatype"].setValue("8 bit")
             nuke.execute(writer, frame, frame, views=[view])
         return {
             "viewer": viewer.fullName(), "source": source.fullName(),
             "frame": frame, "width": width, "height": height,
-            "colorspace": "Rec.709",
+            "colorspace": "sRGB",
             "viewer_process": _value(viewer, "viewerProcess", "None"),
         }
     finally:
@@ -283,7 +272,7 @@ def _render_frame(viewer, source, frame, view, process, path):
 
 
 def copy_frame():
-    """Copy one full-format Rec.709 frame to the clipboard."""
+    """Copy one full-format sRGB frame to the clipboard."""
     global _busy
     if _busy:
         return None
@@ -311,7 +300,7 @@ def copy_frame():
             if picture.isNull():
                 raise RuntimeError("The frame render returned no image.")
             picture = picture.convertToFormat(QtGui.QImage.Format_RGB32)
-            picture.setColorSpace(_rec709_profile())
+            picture.setColorSpace(_srgb_profile())
             if (picture.width(), picture.height()) != (result["width"], result["height"]):
                 raise RuntimeError("The rendered image size did not match the input format.")
 
@@ -325,7 +314,7 @@ def copy_frame():
         data.setImageData(picture)
         data.setData("image/png", png)
         app.clipboard().setMimeData(data)
-        message = "Copied Rec.709 frame {frame:g} ({width} x {height})".format(**result)
+        message = "Copied sRGB frame {frame:g} ({width} x {height})".format(**result)
         nuke.tprint(message)
         QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), message)
         return result

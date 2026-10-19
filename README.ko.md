@@ -1,6 +1,6 @@
 # Nuke Viewer Clipboard
 
-현재 Viewer 프레임을 **Viewer 룩을 유지한 채 Rec.709로 변환해, 출력 해상도 그대로 클립보드에 복사**하는 Nuke 플러그인입니다. **Ctrl+Alt+C**로 복사하고, 이미지를 지원하는 앱에 붙여넣을 수 있습니다.
+현재 Viewer 프레임을 **Viewer 룩을 유지한 채 sRGB로 변환해, 출력 해상도 그대로 클립보드에 복사**하는 Nuke 플러그인입니다. **Ctrl+Alt+C**로 복사하고, 이미지를 지원하는 앱에 붙여넣을 수 있습니다.
 
 [English](README.md) · [다운로드](https://github.com/tardis7732/nuke-viewer-clipboard/releases/latest)
 
@@ -9,9 +9,9 @@
 - 활성 Viewer의 기본 입력과 현재 프레임을 사용합니다.
 - Reformat을 포함한 연결 노드의 출력 크기를 따릅니다.
 - Viewer 확대·이동과 관계없이 전체 프레임을 복사하며, UI 여백과 오버레이는 포함하지 않습니다.
-- 선택한 Viewer Process의 색변환·톤매핑을 먼저 적용하고, 그 표시용 RGB를 Rec.709로 변환합니다.
+- 선택한 Viewer Process의 색변환·톤매핑을 먼저 적용하고, 그 표시용 RGB를 sRGB로 변환합니다.
 - Viewer의 gain·gamma·saturation은 Input Process 또는 Viewer Process가 담당하는 경우까지 포함해 한 번만 적용합니다.
-- 클립보드에는 불투명한 8비트 RGB 이미지와 Rec.709 ICC 프로필을 담은 PNG 데이터를 넣습니다.
+- 클립보드에는 불투명한 8비트 RGB 이미지와 sRGB ICC 프로필을 담은 PNG 데이터를 넣습니다.
 - 현재 한 프레임만 임시 PNG로 렌더하고, 이미지를 읽은 뒤 임시 폴더를 삭제합니다.
 
 예를 들어 **1920 × 1080 Reformat**을 Viewer에 연결하면 복사되는 이미지도 **1920 × 1080**입니다. 영상 자체에 포함된 레터박스는 유지됩니다.
@@ -41,11 +41,11 @@
 
 복사가 완료되면 프레임 번호와 이미지 크기가 툴팁으로 표시됩니다. 처리 시간은 연결된 노드 그래프에 따라 달라집니다. 렌더를 취소하면 기존 클립보드 내용이 유지됩니다.
 
-색 처리 순서는 **Viewer Process와 조절값 → 표시 색공간 변환 → Rec.709 클립보드 이미지**입니다. 선택한 Viewer 룩을 유지하면서 마지막 출력 인코딩을 바꿉니다. ACES 톤매핑을 제거하거나 다른 view transform을 추가로 적용하지 않습니다. 출력은 Rec.709 원색과 Nuke의 `rec709` 전달 커브를 사용하며, 이에 맞는 ICC 프로필을 포함합니다.
+색 처리 순서는 **Viewer Process와 조절값 → 표시 색공간 변환 → sRGB 클립보드 이미지**입니다. 선택한 Viewer 룩을 유지하면서 마지막 출력 인코딩을 바꿉니다. ACES 톤매핑을 제거하거나 다른 view transform을 추가로 적용하지 않습니다. 출력은 sRGB 원색과 전달 커브를 사용하며, 이에 맞는 ICC 프로필을 포함합니다.
 
 Raw는 view transform을 건너뛰므로, 화면에 표시되는 RGB 값을 선택한 OCIO display의 인코딩으로 해석합니다. Nuke 기본 Raw/None과 기본 OCIO config의 Raw는 sRGB 디스플레이를 가정합니다.
 
-HDR Viewer display도 **SDR 화면용 프리뷰**로 복사할 수 있습니다. 선택한 HDR view transform과 Viewer 조절값을 적용한 RGB를 sRGB 화면용 프리뷰로 해석한 뒤 Rec.709로 인코딩합니다. 별도 톤매핑을 추가하지 않으며, HDR 모니터의 실제 휘도를 재현하거나 납품용 HDR→SDR 마스터를 만드는 기능은 아닙니다.
+HDR Viewer display도 **SDR 화면용 프리뷰**로 복사할 수 있습니다. 선택한 HDR view transform과 Viewer 조절값을 적용한 RGB 값은 그대로 유지하고 sRGB 화면용 프리뷰 프로필을 붙입니다. 별도 톤매핑이나 전달 커브 변환을 추가하지 않으며, HDR 모니터의 실제 휘도를 재현하거나 납품용 HDR→SDR 마스터를 만드는 기능은 아닙니다.
 
 ### 단축키 변경
 
@@ -70,10 +70,10 @@ PNG는 운영체제 임시 경로의 `nuke_viewer_clipboard_*` 폴더에 생성�
 - 출력은 표시용 8비트 이미지입니다. 알파 투명도와 부동소수점 HDR 값은 보존하지 않습니다.
 - Viewer의 A/B 와이프·비교 모드·3D 뷰·마스크·오버레이는 재현하지 않으며 기본 입력을 복사합니다.
 - RGB 및 R/G/B/A/Y 채널 표시를 지원합니다. 다른 채널 표시 모드는 오류 안내 후 중단합니다.
-- 단일 입력 Input Process 노드·Group은 복사할 수 있지만, 외부 연결이나 상대 경로 표현식에 의존하는 설정은 별도 출력 구성이 필요할 수 있습니다. IP의 before/after는 Viewer Process를 기준으로 유지하며, Rec.709 변환은 두 처리 뒤에 적용합니다.
-- Nuke 기본 sRGB·Rec.709·gamma 표시 LUT, 기본 OCIO config의 표준 SDR view, 내장 ACES CG 1.3/2.0 config의 display를 지원합니다. SDR ACES 변환에는 표시 기준의 입력 색공간과 Rec.1886 Rec.709 출력 색공간이 필요하며, HDR display는 위의 화면용 프리뷰 방식으로 처리합니다. 지원하지 않는 사용자 정의 Viewer Process는 오류를 안내합니다.
-- Rec.709 색역과 8비트 출력 범위를 벗어난 색은 잘릴 수 있습니다. 모니터 캘리브레이션이나 운영체제의 디스플레이 프로필을 읽지는 않습니다.
-- PNG 데이터에는 Rec.709 프로필이 들어갑니다. 프로필 없는 클립보드 비트맵을 쓰거나 기존 문서에 붙이는 앱은 대상 문서의 프로필을 사용할 수 있습니다.
+- 단일 입력 Input Process 노드·Group은 복사할 수 있지만, 외부 연결이나 상대 경로 표현식에 의존하는 설정은 별도 출력 구성이 필요할 수 있습니다. IP의 before/after는 Viewer Process를 기준으로 유지하며, sRGB 변환은 두 처리 뒤에 적용합니다.
+- Nuke 기본 sRGB·Rec.709·gamma 표시 LUT, 기본 OCIO config의 표준 SDR view, 내장 ACES CG 1.3/2.0 config의 display를 지원합니다. SDR ACES 변환에는 표시 기준의 입력 색공간과 sRGB 출력 색공간이 필요하며, HDR display는 위의 화면용 프리뷰 방식으로 처리합니다. 지원하지 않는 사용자 정의 Viewer Process는 오류를 안내합니다.
+- sRGB 색역과 8비트 출력 범위를 벗어난 색은 잘릴 수 있습니다. 모니터 캘리브레이션이나 운영체제의 디스플레이 프로필을 읽지는 않습니다.
+- PNG 데이터에는 sRGB 프로필이 들어갑니다. 프로필 없는 클립보드 비트맵을 쓰거나 기존 문서에 붙이는 앱은 대상 문서의 프로필을 사용할 수 있습니다.
 
 ## 삭제
 

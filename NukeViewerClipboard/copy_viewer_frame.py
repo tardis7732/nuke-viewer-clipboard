@@ -1,4 +1,4 @@
-"""Copy the active Viewer input at full resolution in Rec.709."""
+"""Copy the active Viewer's look at full resolution, encoded as Rec.709."""
 
 import os
 import tempfile
@@ -22,23 +22,87 @@ def _value(node, name, default=None):
     return knob.value() if knob is not None else default
 
 
-def _to_rec709(source):
-    """Convert working RGB primaries, then apply Nuke's rec709 curve once."""
-    if _value(nuke.root(), "colorManagement", "Nuke") == "OCIO":
-        conversion = nuke.nodes.OCIOColorSpace(inputs=[source])
-        available = {name.split("\t", 1)[0]
-                     for name in conversion["out_colorspace"].values()}
-        candidates = ("Linear Rec.709 (sRGB)", "Utility - Linear - sRGB",
-                      "Utility - Linear - Rec.709", "lin_rec709")
-        target = next((name for name in candidates if name in available), None)
-        if target is None and _value(nuke.root(), "OCIO_config") == "nuke-default":
-            target = "linear"
-        if target is None:
-            raise RuntimeError("The OCIO config needs a linear Rec.709 colorspace.")
-        conversion["in_colorspace"].setValue(nuke.root()["workingSpaceLUT"].value())
-        conversion["out_colorspace"].setValue(target)
-        source = conversion
-    return nuke.nodes.ViewerLUT(inputs=[source], current="rec709", rgb_only=True)
+def _clone_process(original):
+    """Copy the Viewer Process without touching its live instance."""
+    if original.Class() not in ("ViewerLUT", "OCIODisplay"):
+        raise RuntimeError("This custom Viewer Process needs a dedicated export setup.")
+    clone = getattr(nuke.nodes, original.Class())()
+    excluded = {
+        "name", "xpos", "ypos", "selected", "onCreate", "onDestroy",
+        "knobChanged", "updateUI", "autolabel", "rootNodeUpdated", "panel",
+    }
+    # Set the display before the dependent view enumeration.
+    keys = list(original.knobs())
+    keys = [k for k in ("colorspace", "display", "view") if k in keys] + [
+        k for k in keys if k not in ("colorspace", "display", "view")
+    ]
+    for name in keys:
+        knob = clone.knob(name)
+        if knob is None or name in excluded:
+            continue
+        if original[name].Class() in ("Tab_Knob", "Text_Knob", "PyScript_Knob", "Script_Knob"):
+            continue
+        knob.fromScript(original[name].toScript(False))
+    return clone
+
+
+def _to_rec709(source, process):
+    """Convert already displayed RGB, without undoing or repeating its view transform."""
+    encoding = "sRGB"  # Native Raw/None has no encoding; use an sRGB display.
+    if process is not None and process.Class() == "OCIODisplay":
+        import PyOpenColorIO as ocio
+        from ocionuke.config import getOCIOConfig
+
+        if _value(process, "invert", False) or _value(process, "disable", False):
+            raise RuntimeError("Use an enabled, forward Viewer Process before copying.")
+        config = getOCIOConfig()
+        display = process["display"].value()
+        view = process["view"].value()
+        name = config.getDisplayViewColorSpaceName(display, view)
+        if name == "<USE_DISPLAY_NAME>":
+            name = display
+        space = config.getColorSpace(name)
+        if space is not None and space.isData():
+            # Raw skips the view transform. Interpret its visible RGB in the
+            # selected display encoding, rather than as scene-linear pixels.
+            space = config.getColorSpace(display)
+            if space is None and _value(nuke.root(), "OCIO_config") == "nuke-default":
+                space = config.getColorSpace("sRGB")
+        if space is None:
+            raise RuntimeError("Cannot determine this Viewer's display encoding.")
+        if space.getReferenceSpaceType() == ocio.REFERENCE_SPACE_DISPLAY:
+            if space.getEncoding() == "hdr-video":
+                raise RuntimeError("Select an SDR Viewer display before copying to Rec.709.")
+            target = config.getColorSpace("rec1886_rec709_display")
+            if target is None:
+                target = config.getColorSpace("Rec.1886 Rec.709 - Display")
+            if target is None or target.getReferenceSpaceType() != ocio.REFERENCE_SPACE_DISPLAY:
+                raise RuntimeError("The config needs a Rec.1886 Rec.709 display colorspace.")
+            conversion = nuke.nodes.OCIOColorSpace(inputs=[source])
+            conversion["in_colorspace"].setValue(space.getName())
+            conversion["out_colorspace"].setValue(target.getName())
+            source = conversion
+            encoding = "2.40"
+        elif _value(nuke.root(), "OCIO_config") == "nuke-default":
+            encoding = space.getName()
+        else:
+            raise RuntimeError("This config needs display-referred colorspaces for look-preserving export.")
+    elif process is not None:
+        if process.Class() != "ViewerLUT":
+            raise RuntimeError("This custom Viewer Process needs a dedicated export setup.")
+        encoding = _value(process, "current", "sRGB")
+
+    encoding = {"linear": "sRGB", "raw": "sRGB", "Gamma1.8": "1.80", "Gamma2.2": "2.20",
+                "Gamma2.4": "2.40", "Gamma2.6": "2.60"}.get(encoding, encoding)
+    if encoding not in ("sRGB", "rec709", "1.80", "2.20", "2.40", "2.60", "BT1886"):
+        raise RuntimeError("Unsupported Viewer display encoding: {}".format(encoding))
+    if encoding == "rec709":
+        return source
+    # Decode only the display transfer curve and encode Rec.709. The Viewer
+    # Process (including ACES tone mapping) has already been baked upstream.
+    return nuke.nodes.Colorspace(
+        inputs=[source], channels="rgb", colorspace_in=encoding, colorspace_out="rec709",
+    )
 
 
 def _rec709_profile():
@@ -71,7 +135,7 @@ def _save_input_process(node, path):
                 item.setSelected(True)
 
 
-def _render_frame(viewer, source, frame, view, path):
+def _render_frame(viewer, source, frame, view, process, path):
     """Render one Rec.709 frame and restore the working script."""
     parent = viewer.parent()
     ip_name = _value(viewer, "input_process_node", "")
@@ -83,9 +147,10 @@ def _render_frame(viewer, source, frame, view, path):
         name: float(_value(viewer, name, 1))
         for name in ("gain", "gamma", "saturation")
     }
-    # An Input Process can own a control; otherwise apply it externally once.
+    # Nuke delegates matching controls to IP first, then Viewer Process.
     owners = {
-        name: ip if ip is not None and ip.knob(name) is not None else None
+        name: next((node for node in (ip, process)
+                    if node is not None and node.knob(name) is not None), None)
         for name in controls
     }
 
@@ -130,7 +195,11 @@ def _render_frame(viewer, source, frame, view, path):
                 bind_controls(clone, ip)
                 clone.setInput(0, current)
                 current = clone
-            current = _to_rec709(current)
+            if process is not None:
+                clone = _clone_process(process)
+                bind_controls(clone, process)
+                clone.setInput(0, current)
+                current = clone
             if ip is not None and not ip_before:
                 clone = nuke.nodePaste(ip_path)
                 bind_controls(clone, ip)
@@ -147,19 +216,21 @@ def _render_frame(viewer, source, frame, view, path):
                 "R": "r", "G": "g", "B": "b", "A": "a",
                 "Red": "r", "Green": "g", "Blue": "b", "Alpha": "a",
             }.get(style)
-            if channel:
+            process_handles_channels = process is not None and process.knob("channel_selector") is not None
+            if channel and not process_handles_channels:
                 current = nuke.nodes.Expression(
                     inputs=[current], expr0=channel, expr1=channel, expr2=channel,
                 )
-            elif style in ("Y", "Luminance"):
+            elif style in ("Y", "Luminance") and not process_handles_channels:
                 luminance = "0.2126*r+0.7152*g+0.0722*b"
                 current = nuke.nodes.Expression(
                     inputs=[current], expr0=luminance, expr1=luminance, expr2=luminance,
                 )
-            elif style != "RGB":
+            elif style not in ("RGB", "Y", "Luminance") and channel is None:
                 raise RuntimeError(
                     "Switch the Viewer channel display to RGB, R, G, B, A or Y before copying."
                 )
+            current = _to_rec709(current, process)
             # Crop only the format boundary, never detect black pixels in the image.
             fmt = current.format()
             width, height = fmt.width(), fmt.height()
@@ -177,6 +248,7 @@ def _render_frame(viewer, source, frame, view, path):
             "viewer": viewer.fullName(), "source": source.fullName(),
             "frame": frame, "width": width, "height": height,
             "colorspace": "Rec.709",
+            "viewer_process": _value(viewer, "viewerProcess", "None"),
         }
     finally:
         # Restore global state even if removing a temporary node fails.
@@ -220,13 +292,14 @@ def copy_frame():
             raise RuntimeError("Connect an image to the active Viewer input first.")
         frame = int(_value(viewer, "frame", nuke.frame()))
         view = window.view()
+        process = nuke.ViewerProcess.node(viewer=viewer.fullName())
         app = QtWidgets.QApplication.instance()
         if app is None:
             raise RuntimeError("Copy Frame requires the Nuke GUI.")
 
         with tempfile.TemporaryDirectory(prefix="nuke_viewer_clipboard_") as temp:
             path = os.path.join(temp, "frame.png")
-            result = _render_frame(viewer, source, frame, view, path)
+            result = _render_frame(viewer, source, frame, view, process, path)
             picture = QtGui.QImage(path)
             if picture.isNull():
                 raise RuntimeError("The frame render returned no image.")

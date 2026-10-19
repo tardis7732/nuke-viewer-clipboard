@@ -19,12 +19,16 @@ _busy = False
 
 def _value(node, name, default=None):
     knob = node.knob(name)
+    if knob is not None and knob.Class() == "Link_Knob":
+        knob = knob.getLinkedKnob()
     return knob.value() if knob is not None else default
 
 
 def _clone_process(original):
     """Copy the Viewer Process without touching its live instance."""
-    if original.Class() not in ("ViewerLUT", "OCIODisplay"):
+    if original.Class() not in (
+        "ViewerLUT", "OCIODisplay", "ViewerProcess_1DLUT", "ViewerProcess_None",
+    ):
         raise RuntimeError("This custom Viewer Process needs a dedicated export setup.")
     clone = getattr(nuke.nodes, original.Class())()
     excluded = {
@@ -90,8 +94,8 @@ def _to_srgb(source, process):
             encoding = space.getName()
         else:
             raise RuntimeError("This config needs display-referred colorspaces for look-preserving export.")
-    elif process is not None:
-        if process.Class() != "ViewerLUT":
+    elif process is not None and process.Class() != "ViewerProcess_None":
+        if process.Class() not in ("ViewerLUT", "ViewerProcess_1DLUT"):
             raise RuntimeError("This custom Viewer Process needs a dedicated export setup.")
         encoding = _value(process, "current", "sRGB")
 

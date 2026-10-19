@@ -71,7 +71,7 @@ PNG는 운영체제 임시 경로의 `nuke_viewer_clipboard_*` 폴더에 생성�
 - Viewer의 A/B 와이프·비교 모드·3D 뷰·마스크·오버레이는 재현하지 않으며 기본 입력을 복사합니다.
 - RGB 및 R/G/B/A/Y 채널 표시를 지원합니다. 다른 채널 표시 모드는 오류 안내 후 중단합니다.
 - 단일 입력 Input Process 노드·Group은 복사할 수 있지만, 외부 연결이나 상대 경로 표현식에 의존하는 설정은 별도 출력 구성이 필요할 수 있습니다. IP의 before/after는 Viewer Process를 기준으로 유지하며, sRGB 변환은 두 처리 뒤에 적용합니다.
-- Nuke 기본 sRGB·Rec.709·gamma 표시 LUT, 기본 OCIO config의 표준 SDR view, 내장 ACES CG 1.3/2.0 config의 display를 지원합니다. SDR ACES 변환에는 표시 기준의 입력 색공간과 sRGB 출력 색공간이 필요하며, HDR display는 위의 화면용 프리뷰 방식으로 처리합니다. 지원하지 않는 사용자 정의 Viewer Process는 오류를 안내합니다.
+- Nuke 기본 Viewer의 sRGB·Rec.709·Rec.1886·None 선택, gamma 표시 LUT, 기본 OCIO config의 표준 SDR view, 내장 ACES CG 1.3/2.0 config의 display를 지원합니다. SDR ACES 변환에는 표시 기준의 입력 색공간과 sRGB 출력 색공간이 필요하며, HDR display는 위의 화면용 프리뷰 방식으로 처리합니다. 지원하지 않는 사용자 정의 Viewer Process는 오류를 안내합니다.
 - sRGB 색역과 8비트 출력 범위를 벗어난 색은 잘릴 수 있습니다. 모니터 캘리브레이션이나 운영체제의 디스플레이 프로필을 읽지는 않습니다.
 - PNG 데이터에는 sRGB 프로필이 들어갑니다. 프로필 없는 클립보드 비트맵을 쓰거나 기존 문서에 붙이는 앱은 대상 문서의 프로필을 사용할 수 있습니다.
 

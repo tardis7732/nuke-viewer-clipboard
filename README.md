@@ -71,7 +71,7 @@ The temporary PNG is created inside the operating system’s temporary directory
 - Viewer A/B wipes, comparison modes, 3D views, masks and overlays are not reproduced. The primary input is copied.
 - RGB and individual R/G/B/A/Y channel display modes are supported. Other channel display modes are rejected.
 - Single-input Input Process nodes and Groups can be copied; external dependencies or relative expressions inside custom processes may require a dedicated export setup. IP ordering remains relative to the Viewer Process; sRGB conversion follows both.
-- Supports native sRGB, Rec.709 and gamma display LUTs, standard SDR views in Nuke's default OCIO config, and the bundled ACES CG 1.3/2.0 displays. SDR ACES conversion requires display-referred source and sRGB destination spaces; HDR displays use the screen-preview behavior above. Unsupported/custom Viewer Processes produce an error.
+- Supports Nuke's built-in sRGB, Rec.709, Rec.1886 and None Viewer selections, native gamma display LUTs, standard SDR views in Nuke's default OCIO config, and the bundled ACES CG 1.3/2.0 displays. SDR ACES conversion requires display-referred source and sRGB destination spaces; HDR displays use the screen-preview behavior above. Unsupported/custom Viewer Processes produce an error.
 - Colors outside sRGB's gamut and the 8-bit output range may clip. The plugin does not inspect the monitor's calibration or operating-system display profile.
 - The PNG representation carries an sRGB profile. Applications that use an untagged clipboard bitmap or paste into an existing document may use the destination document's profile instead.
 
